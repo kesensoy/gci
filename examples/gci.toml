@@ -1,0 +1,31 @@
+# GCI Configuration Example
+# Copy to ~/.config/gci/config.toml and customize for your environment
+
+schema_version = 1
+projects = ["MYPROJECT", "INFRA"]
+default_scope = "assigned_or_reported"
+jira_url = "https://your-company.atlassian.net"
+
+# Claude AI integration (auto-detected during gci setup)
+# Set to true if you have the Claude CLI installed and want AI-assisted workflows
+enable_claude = false
+
+# Git worktrees for Interactive Mode (Enter key in gci board)
+# When true, Interactive Mode creates worktrees; when false, it checks out branches
+enable_worktrees = true
+
+[boards]
+MYPROJECT_kanban = 123
+INFRA_scrum = 456
+
+[ui_prefs]
+fuzzy_search = true
+show_extra_fields = false
+
+# Optional: 1Password paths for API tokens
+# op_jira_token_path = "op://VaultName/JIRA API Key/credential"
+# op_github_token_path = "op://VaultName/GitHub Token/credential"
+
+# Optional: Email domain aliases (git email domain -> JIRA email domain)
+# [email_domain_map]
+# "old-domain.com" = "new-domain.com"

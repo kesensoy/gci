@@ -1,0 +1,34 @@
+project_name: gci
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # Only build darwin/arm64 and linux/amd64
+    ignore:
+      - goos: darwin
+        goarch: amd64
+      - goos: linux
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X gci/internal/version.Version={{.Version}}
+      - -X gci/internal/version.Commit={{.ShortCommit}}
+      - -X gci/internal/version.Date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: kesensoy
+    name: gci

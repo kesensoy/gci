@@ -1,0 +1,41 @@
+# Binaries
+gci
+gci.exe
+*.exe
+
+# Go build artifacts
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Temporary files
+*.tmp
+*.log
+
+# Local config overrides (if we add them later)
+config.local.json
+.env.local
+
+# Git worktrees
+.worktrees/
+
+llm/
+docs/
+
+# Engineering tracking artifacts (keep locally, don't commit)
+results.md
+VERIFICATION.md
+
+vendor/
+.serena/
+.claude/
+.mcp.json
+*.local

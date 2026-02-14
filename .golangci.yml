@@ -1,0 +1,101 @@
+# golangci-lint configuration for GCI
+version: 2
+
+run:
+  timeout: 3m
+  issues-exit-code: 1
+  tests: true
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - shadow # Too noisy for this codebase
+      
+  gocyclo:
+    min-complexity: 15
+    
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+    
+  misspell:
+    locale: US
+    
+  unparam:
+    check-exported: false
+    
+  unused:
+    check-exported: false
+      
+  gocritic:
+    enabled-tags:
+      - performance
+      - style
+    disabled-checks:
+      - wrapperFunc
+      - dupImport
+      
+  revive:
+    min-confidence: 0.8
+    rules:
+      - name: var-naming
+        severity: warning
+        disabled: false
+        arguments:
+          - ["ID"] # Allow ID as a valid identifier
+      - name: exported
+        severity: warning
+        disabled: false
+
+linters:
+  disable-all: true
+  enable:
+    # Default enabled linters (always good to have)
+    - errcheck      # Check for unchecked errors
+    - govet         # Standard Go vet checks
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Go static analysis checks
+    - unused        # Find unused code
+    
+    # Additional useful linters
+    - revive        # Replacement for golint
+    - misspell      # Check for common misspellings
+    - goconst       # Find repeated strings that could be constants
+    - gocritic      # Various style checks
+    - gocyclo       # Check cyclomatic complexity
+    - unparam       # Find unused function parameters
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - goconst
+        - unparam
+        
+    # Allow unused parameters in main functions and CLI command handlers
+    - path: main\.go
+      text: "parameter .* seems to be unused"
+      linters:
+        - unparam
+        
+    # TUI code can be complex
+    - path: board_tui\.go
+      linters:
+        - gocyclo
+        - gocritic
+        
+  exclude:
+    # Allow fmt.Print* in CLI application
+    - "Error return value of `fmt\\.Print.*` is not checked"
