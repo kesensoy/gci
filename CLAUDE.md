@@ -104,9 +104,8 @@ enable_worktrees = true   # enables git worktrees for Interactive Mode (Enter ke
 PROJ1_kanban = 123
 PROJ2_scrum = 456
 
-# Optional: 1Password token paths
+# Optional: 1Password path for JIRA API token
 # op_jira_token_path = "op://VaultName/ItemName/credential"
-# op_github_token_path = "op://VaultName/ItemName/credential"
 
 # Optional: email domain aliases
 # [email_domain_map]
@@ -171,7 +170,7 @@ Loading order and fallbacks:
 
 ### Security and secrets
 
-- 1Password access is read-only via configured `op_jira_token_path` / `op_github_token_path`.
+- 1Password access is read-only via configured `op_jira_token_path`.
 - `JIRA_API_TOKEN` env var provides a non-1Password auth path.
 - Never log secrets. Avoid printing the email/token.
 - For network calls, set conservative timeouts and handle errors gracefully.

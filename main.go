@@ -1422,7 +1422,8 @@ func runSetup(cmd *cobra.Command, args []string) {
 	if configureOP {
 		fmt.Println()
 		fmt.Println("  To store your JIRA API token in 1Password:")
-		fmt.Println("    1. Create an API token at: https://id.atlassian.net/manage-profile/security/api-tokens")
+		fmt.Println("    1. Create an API token at: https://id.atlassian.com/manage-profile/security/api-tokens")
+		fmt.Println("       (click your avatar top-right to check which email is used)")
 		fmt.Println("    2. In 1Password, create a new item (type: API Credential)")
 		fmt.Println("    3. Set the username to your Atlassian email (e.g. you@company.com)")
 		fmt.Println("    4. Paste the API token as the credential")
@@ -1447,33 +1448,6 @@ func runSetup(cmd *cobra.Command, args []string) {
 		}
 		newConfig.OPJiraTokenPath = fmt.Sprintf("op://Private/%s/credential", jiraItemName)
 
-		var configureGH bool
-		if err := survey.AskOne(&survey.Confirm{
-			Message: "Also configure a GitHub token in 1Password? (optional, for gci update)",
-			Default: false,
-		}, &configureGH); err != nil {
-			fmt.Println("Setup cancelled")
-			return
-		}
-		if configureGH {
-			existingGHItem := ""
-			if currentConfig.OPGithubTokenPath != "" {
-				parts := strings.Split(currentConfig.OPGithubTokenPath, "/")
-				if len(parts) >= 4 {
-					existingGHItem = parts[3]
-				}
-			}
-
-			var ghItemName string
-			if err := survey.AskOne(&survey.Input{
-				Message: "1Password item name for GitHub token:",
-				Default: existingGHItem,
-			}, &ghItemName, survey.WithValidator(survey.Required)); err != nil {
-				fmt.Println("Setup cancelled")
-				return
-			}
-			newConfig.OPGithubTokenPath = fmt.Sprintf("op://Private/%s/credential", ghItemName)
-		}
 	}
 
 	// Claude AI integration
@@ -1658,9 +1632,6 @@ func runSetup(cmd *cobra.Command, args []string) {
 	fmt.Printf("  Worktrees: %v\n", newConfig.WorktreesEnabled())
 	if newConfig.OPJiraTokenPath != "" {
 		fmt.Printf("  JIRA Token Path: %s\n", newConfig.OPJiraTokenPath)
-	}
-	if newConfig.OPGithubTokenPath != "" {
-		fmt.Printf("  GitHub Token Path: %s\n", newConfig.OPGithubTokenPath)
 	}
 }
 
@@ -1877,26 +1848,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// Token for private repo -- try env var, then 1Password (configured path)
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		userConfig := usercfg.GetRuntimeConfig()
-		if userConfig.OPGithubTokenPath != "" {
-			out, err := exec.Command("op", "read", userConfig.OPGithubTokenPath).Output()
-			if err == nil {
-				token = strings.TrimSpace(string(out))
-			}
-		}
-	}
-	if token == "" {
-		fmt.Println("GitHub token required for updates.")
-		fmt.Println("Set GITHUB_TOKEN env var or configure op_github_token_path in ~/.config/gci/config.toml")
-		return
-	}
-
-	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{
-		APIToken: token,
-	})
+	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
 	if err != nil {
 		fmt.Printf("Failed to create update source: %v\n", err)
 		return

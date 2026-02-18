@@ -43,7 +43,6 @@ type Config struct {
 	EnableClaude      *bool             `toml:"enable_claude"`
 	EnableWorktrees   *bool             `toml:"enable_worktrees"`
 	OPJiraTokenPath   string            `toml:"op_jira_token_path,omitempty"`
-	OPGithubTokenPath string            `toml:"op_github_token_path,omitempty"`
 	EmailDomainMap    map[string]string `toml:"email_domain_map,omitempty"`
 }
 
@@ -221,11 +220,6 @@ func applyEnvOverlays(config Config) Config {
 	// GCI_OP_JIRA_TOKEN_PATH: override 1Password JIRA token path
 	if v := os.Getenv("GCI_OP_JIRA_TOKEN_PATH"); v != "" {
 		config.OPJiraTokenPath = v
-	}
-
-	// GCI_OP_GITHUB_TOKEN_PATH: override 1Password GitHub token path
-	if v := os.Getenv("GCI_OP_GITHUB_TOKEN_PATH"); v != "" {
-		config.OPGithubTokenPath = v
 	}
 
 	return config
