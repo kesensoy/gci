@@ -1397,6 +1397,11 @@ func runSetup(cmd *cobra.Command, args []string) {
 	}
 	newConfig.EnableWorktrees = &enableWorktrees
 
+	// Save config before board discovery so loadConfig() can find it
+	if err := usercfg.Save(newConfig); err != nil {
+		log.Fatalf("Failed to save configuration: %v", err)
+	}
+
 	// Board discovery
 	var discoverBoards bool
 	if err := survey.AskOne(&survey.Confirm{
@@ -1412,7 +1417,8 @@ func runSetup(cmd *cobra.Command, args []string) {
 
 		config, err := loadConfig()
 		if err != nil {
-			fmt.Printf("Warning: Could not load auth config for discovery: %v\n", err)
+			fmt.Println("Board discovery requires a JIRA API token.")
+			fmt.Println("Set JIRA_API_TOKEN env var or configure 1Password paths, then re-run 'gci setup'.")
 		} else {
 			boards, err := jira.DiscoverBoards(config.JiraURL, config.Email, config.APIToken)
 			if err != nil {
