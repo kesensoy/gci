@@ -40,8 +40,8 @@ type Config struct {
 	JiraURL           string            `toml:"jira_url"`
 	Boards            map[string]int    `toml:"boards"`
 	UIPrefs           UIPreferences     `toml:"ui_prefs,omitempty"`
-	EnableClaude      *bool             `toml:"enable_claude,omitempty"`
-	EnableWorktrees   *bool             `toml:"enable_worktrees,omitempty"`
+	EnableClaude      *bool             `toml:"enable_claude"`
+	EnableWorktrees   *bool             `toml:"enable_worktrees"`
 	OPJiraTokenPath   string            `toml:"op_jira_token_path,omitempty"`
 	OPGithubTokenPath string            `toml:"op_github_token_path,omitempty"`
 	EmailDomainMap    map[string]string `toml:"email_domain_map,omitempty"`
