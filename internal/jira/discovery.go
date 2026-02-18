@@ -37,7 +37,7 @@ type DiscoveryCache struct {
 	Timestamp time.Time           `json:"timestamp"`
 }
 
-func DiscoverBoards(jiraURL, email, apiToken string) ([]Board, error) {
+func DiscoverBoards(jiraURL, email, apiToken string, projectKeys ...string) ([]Board, error) {
 	cacheFile := getCacheFilePath()
 	
 	if cached, ok := loadFromCache(cacheFile); ok {
@@ -49,7 +49,7 @@ func DiscoverBoards(jiraURL, email, apiToken string) ([]Board, error) {
 		return result, nil
 	}
 
-	boards, err := fetchBoardsFromAPI(jiraURL, email, apiToken)
+	boards, err := fetchBoardsFromAPI(jiraURL, email, apiToken, projectKeys...)
 	if err != nil {
 		return nil, err
 	}
@@ -121,27 +121,57 @@ func FetchBoardsFromAPI(jiraURL, email, apiToken string) ([]Board, error) {
 	return fetchBoardsFromAPI(jiraURL, email, apiToken)
 }
 
-func fetchBoardsFromAPI(jiraURL, email, apiToken string) ([]Board, error) {
+func fetchBoardsFromAPI(jiraURL, email, apiToken string, projectKeys ...string) ([]Board, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	
 	client := httputil.NewRetryableClient(10*time.Second, 2)
 
-	url := fmt.Sprintf("%s/rest/agile/1.0/board?maxResults=50", jiraURL)
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
+	var allBoards []Board
+	if len(projectKeys) > 0 {
+		// Fetch boards per project for targeted results
+		for _, key := range projectKeys {
+			url := fmt.Sprintf("%s/rest/agile/1.0/board?maxResults=50&projectKeyOrId=%s", jiraURL, key)
+			req, err := http.NewRequest("GET", url, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create request: %v", err)
+			}
+			req.SetBasicAuth(email, apiToken)
+			req.Header.Set("Accept", "application/json")
+
+			var boardsResp BoardsResponse
+			if err := client.DoJSONRequest(ctx, req, &boardsResp); err != nil {
+				continue // Skip projects that fail, try the rest
+			}
+			allBoards = append(allBoards, boardsResp.Values...)
+		}
+	} else {
+		// No projects specified — fetch all boards
+		url := fmt.Sprintf("%s/rest/agile/1.0/board?maxResults=50", jiraURL)
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %v", err)
+		}
+		req.SetBasicAuth(email, apiToken)
+		req.Header.Set("Accept", "application/json")
+
+		var boardsResp BoardsResponse
+		if err := client.DoJSONRequest(ctx, req, &boardsResp); err != nil {
+			return nil, fmt.Errorf("failed to fetch boards: %w", err)
+		}
+		allBoards = boardsResp.Values
 	}
 
-	req.SetBasicAuth(email, apiToken)
-	req.Header.Set("Accept", "application/json")
-
-	var boardsResp BoardsResponse
-	if err := client.DoJSONRequest(ctx, req, &boardsResp); err != nil {
-		return nil, fmt.Errorf("failed to fetch boards: %w", err)
+	// Deduplicate boards by ID
+	seen := make(map[int]bool)
+	var unique []Board
+	for _, b := range allBoards {
+		if !seen[b.ID] {
+			seen[b.ID] = true
+			unique = append(unique, b)
+		}
 	}
-
-	return boardsResp.Values, nil
+	return unique, nil
 }
 
 // enhanceBoardsWithActivity adds recent activity data to boards

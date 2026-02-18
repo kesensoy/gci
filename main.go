@@ -414,6 +414,42 @@ func isJiraTokenValid(jiraURL, email, token string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+// fetchJiraEmail calls /rest/api/3/myself and returns the account's email address.
+func fetchJiraEmail(jiraURL, authEmail, token string) (string, error) {
+	if jiraURL == "" || authEmail == "" || token == "" {
+		return "", fmt.Errorf("missing credentials")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client := httputil.NewRetryableClient(5*time.Second, 1)
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/rest/api/3/myself", jiraURL), nil)
+	if err != nil {
+		return "", err
+	}
+	req.SetBasicAuth(authEmail, token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := client.DoWithRetry(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("JIRA API returned %d", resp.StatusCode)
+	}
+
+	var result struct {
+		EmailAddress string `json:"emailAddress"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	return result.EmailAddress, nil
+}
+
 func fetchIssues(config *Config) ([]JiraIssue, error) {
 	// Build project filter
 	var projectFilter string
@@ -1249,7 +1285,7 @@ func runSetup(cmd *cobra.Command, args []string) {
 		fmt.Println("Welcome! Let's configure GCI for your environment.")
 		fmt.Println()
 	} else {
-		fmt.Printf("Current configuration:\n")
+		fmt.Printf("Existing config found at %s — modifying.\n\n", usercfg.Path())
 		fmt.Printf("  JIRA URL: %s\n", currentConfig.JiraURL)
 		fmt.Printf("  Projects: %v\n", currentConfig.Projects)
 		fmt.Printf("  Default Scope: %s\n", currentConfig.DefaultScope)
@@ -1272,12 +1308,12 @@ func runSetup(cmd *cobra.Command, args []string) {
 		newConfig.JiraURL = jiraURL
 	}
 
-	// Projects (free-text input instead of hardcoded multi-select)
+	// Projects
 	setupProjects := isFirstRun
 	if !isFirstRun {
 		if err := survey.AskOne(&survey.Confirm{
-			Message: "Configure projects?",
-			Default: true,
+			Message: fmt.Sprintf("Change projects? (currently: %s)", strings.Join(currentConfig.Projects, ", ")),
+			Default: false,
 		}, &setupProjects); err != nil {
 			fmt.Println("Setup cancelled")
 			return
@@ -1308,62 +1344,110 @@ func runSetup(cmd *cobra.Command, args []string) {
 	}
 
 	// Scope
-	var setupScope bool
-	if err := survey.AskOne(&survey.Confirm{
-		Message: "Configure default scope?",
-		Default: false,
-	}, &setupScope); err != nil {
-		fmt.Println("Setup cancelled")
-		return
+	setupScope := isFirstRun
+	if !isFirstRun {
+		if err := survey.AskOne(&survey.Confirm{
+			Message: fmt.Sprintf("Change default scope? (currently: %s)", currentConfig.DefaultScope),
+			Default: false,
+		}, &setupScope); err != nil {
+			fmt.Println("Setup cancelled")
+			return
+		}
 	}
 
 	if setupScope {
+		scopeOptions := []string{"assigned_or_reported (default)", "assigned", "reported", "unassigned"}
+		scopeDefault := currentConfig.DefaultScope
+		if scopeDefault == "" || scopeDefault == "assigned_or_reported" {
+			scopeDefault = "assigned_or_reported (default)"
+		}
 		var scopeSelection string
-		scopeOptions := []string{"assigned_or_reported", "assigned", "reported", "unassigned"}
 		if err := survey.AskOne(&survey.Select{
-			Message: "Select default scope:",
+			Message: "Which issues should appear by default?",
 			Options: scopeOptions,
-			Default: currentConfig.DefaultScope,
+			Default: scopeDefault,
 		}, &scopeSelection); err != nil {
 			fmt.Println("Setup cancelled")
 			return
 		}
-		newConfig.DefaultScope = scopeSelection
+		// Strip display suffix before saving
+		newConfig.DefaultScope = strings.TrimSuffix(scopeSelection, " (default)")
 	}
 
-	// 1Password paths (optional)
+	// 1Password setup
 	var configureOP bool
-	if err := survey.AskOne(&survey.Confirm{
-		Message: "Configure 1Password token paths?",
-		Default: isFirstRun,
-	}, &configureOP); err != nil {
-		fmt.Println("Setup cancelled")
-		return
+	if !isFirstRun {
+		if err := survey.AskOne(&survey.Confirm{
+			Message: "Change 1Password settings?",
+			Default: false,
+		}, &configureOP); err != nil {
+			fmt.Println("Setup cancelled")
+			return
+		}
+	} else {
+		if err := survey.AskOne(&survey.Confirm{
+			Message: "Use 1Password for API tokens?",
+			Default: true,
+		}, &configureOP); err != nil {
+			fmt.Println("Setup cancelled")
+			return
+		}
 	}
 
 	if configureOP {
-		var jiraPath string
-		if err := survey.AskOne(&survey.Input{
-			Message: "1Password path for JIRA API token (e.g. op://VaultName/ItemName/credential):",
-			Default: currentConfig.OPJiraTokenPath,
-		}, &jiraPath); err != nil {
-			fmt.Println("Setup cancelled")
-			return
-		}
-		if jiraPath != "" {
-			newConfig.OPJiraTokenPath = jiraPath
+		fmt.Println()
+		fmt.Println("  To store your JIRA API token in 1Password:")
+		fmt.Println("    1. Create an API token at: https://id.atlassian.net/manage-profile/security/api-tokens")
+		fmt.Println("    2. In 1Password, create a new item (type: API Credential)")
+		fmt.Println("    3. Set the username to your Atlassian email (e.g. you@company.com)")
+		fmt.Println("    4. Paste the API token as the credential")
+		fmt.Println()
+
+		// Extract existing item name from op:// path if re-running
+		existingJiraItem := ""
+		if currentConfig.OPJiraTokenPath != "" {
+			parts := strings.Split(currentConfig.OPJiraTokenPath, "/")
+			if len(parts) >= 4 {
+				existingJiraItem = parts[3]
+			}
 		}
 
-		var ghPath string
+		var jiraItemName string
 		if err := survey.AskOne(&survey.Input{
-			Message: "1Password path for GitHub token (optional, for gci update):",
-			Default: currentConfig.OPGithubTokenPath,
-		}, &ghPath); err != nil {
+			Message: "1Password item name for JIRA API token:",
+			Default: existingJiraItem,
+		}, &jiraItemName, survey.WithValidator(survey.Required)); err != nil {
 			fmt.Println("Setup cancelled")
 			return
 		}
-		if ghPath != "" {
-			newConfig.OPGithubTokenPath = ghPath
+		newConfig.OPJiraTokenPath = fmt.Sprintf("op://Private/%s/credential", jiraItemName)
+
+		var configureGH bool
+		if err := survey.AskOne(&survey.Confirm{
+			Message: "Also configure a GitHub token in 1Password? (optional, for gci update)",
+			Default: false,
+		}, &configureGH); err != nil {
+			fmt.Println("Setup cancelled")
+			return
+		}
+		if configureGH {
+			existingGHItem := ""
+			if currentConfig.OPGithubTokenPath != "" {
+				parts := strings.Split(currentConfig.OPGithubTokenPath, "/")
+				if len(parts) >= 4 {
+					existingGHItem = parts[3]
+				}
+			}
+
+			var ghItemName string
+			if err := survey.AskOne(&survey.Input{
+				Message: "1Password item name for GitHub token:",
+				Default: existingGHItem,
+			}, &ghItemName, survey.WithValidator(survey.Required)); err != nil {
+				fmt.Println("Setup cancelled")
+				return
+			}
+			newConfig.OPGithubTokenPath = fmt.Sprintf("op://Private/%s/credential", ghItemName)
 		}
 	}
 
@@ -1397,58 +1481,137 @@ func runSetup(cmd *cobra.Command, args []string) {
 	}
 	newConfig.EnableWorktrees = &enableWorktrees
 
-	// Save config before board discovery so loadConfig() can find it
+	// Save config before auth-dependent steps so loadConfig() can find it
 	if err := usercfg.Save(newConfig); err != nil {
 		log.Fatalf("Failed to save configuration: %v", err)
 	}
 
-	// Board discovery
-	var discoverBoards bool
-	if err := survey.AskOne(&survey.Confirm{
-		Message: "Discover boards from JIRA?",
-		Default: false,
-	}, &discoverBoards); err != nil {
-		fmt.Println("Setup cancelled")
-		return
+	// Resolve auth inline for email detection and board discovery.
+	// We do this directly instead of loadConfig() to avoid its os.Exit guard
+	// and to handle the email mismatch case before anything depends on it.
+	var authEmail, apiToken string
+	var authOK bool
+
+	// Get git email for comparison
+	var gitEmail string
+	if gitEmailOut, err := exec.Command("git", "config", "user.email").Output(); err == nil {
+		gitEmail = strings.TrimSpace(string(gitEmailOut))
 	}
 
-	if discoverBoards {
-		fmt.Println("Discovering boards...")
+	// Resolve API token: env var > 1Password
+	apiToken = os.Getenv("JIRA_API_TOKEN")
+	if apiToken == "" && newConfig.OPJiraTokenPath != "" {
+		fmt.Println("\nVerifying JIRA authentication via 1Password...")
+		if out, err := exec.Command("op", "read", newConfig.OPJiraTokenPath).Output(); err == nil {
+			apiToken = strings.TrimSpace(string(out))
+		}
+	}
 
-		config, err := loadConfig()
-		if err != nil {
-			fmt.Println("Board discovery requires a JIRA API token.")
-			fmt.Println("Set JIRA_API_TOKEN env var or configure 1Password paths, then re-run 'gci setup'.")
-		} else {
-			boards, err := jira.DiscoverBoards(config.JiraURL, config.Email, config.APIToken)
-			if err != nil {
-				fmt.Printf("Warning: Board discovery failed: %v\n", err)
-			} else {
-				rankedBoards := jira.RankBoards(boards, newConfig.Projects)
+	// Resolve JIRA email: prefer 1Password username, fall back to git email + /myself
+	if newConfig.OPJiraTokenPath != "" {
+		// Derive username path from credential path: op://Private/<item>/credential → op://Private/<item>/username
+		usernamePath := strings.TrimSuffix(newConfig.OPJiraTokenPath, "/credential") + "/username"
+		if out, err := exec.Command("op", "read", usernamePath).Output(); err == nil {
+			opEmail := strings.TrimSpace(string(out))
+			if opEmail != "" {
+				authEmail = opEmail
 
-				if len(rankedBoards) > 0 {
-					var boardOptions []string
-					boardMap := make(map[string]jira.Board)
-
-					for _, board := range rankedBoards[:min(10, len(rankedBoards))] {
-						option := fmt.Sprintf("%s (ID: %d, Project: %s)", board.Name, board.ID, board.Location.ProjectKey)
-						boardOptions = append(boardOptions, option)
-						boardMap[option] = board
-					}
-
-					var selectedBoards []string
-					if err := survey.AskOne(&survey.MultiSelect{
-						Message: "Select boards to add to configuration:",
-						Options: boardOptions,
-					}, &selectedBoards); err == nil {
-						if newConfig.Boards == nil {
-							newConfig.Boards = make(map[string]int)
+				// Auto-create domain mapping if git email domain differs
+				if gitEmail != "" {
+					gitParts := strings.SplitN(gitEmail, "@", 2)
+					opParts := strings.SplitN(opEmail, "@", 2)
+					if len(gitParts) == 2 && len(opParts) == 2 && gitParts[1] != opParts[1] {
+						if newConfig.EmailDomainMap == nil {
+							newConfig.EmailDomainMap = make(map[string]string)
 						}
-						for _, selected := range selectedBoards {
-							if board, ok := boardMap[selected]; ok {
-								key := fmt.Sprintf("%s_%s", board.Location.ProjectKey, strings.ToLower(board.Type))
-								newConfig.Boards[key] = board.ID
-							}
+						newConfig.EmailDomainMap[gitParts[1]] = opParts[1]
+						fmt.Printf("\nGit email (%s) differs from JIRA email (%s).\n", gitEmail, opEmail)
+						fmt.Printf("Added email domain mapping: %s → %s\n", gitParts[1], opParts[1])
+					}
+				}
+			}
+		}
+	}
+
+	// Fall back to git email if 1Password username wasn't available
+	if authEmail == "" && gitEmail != "" {
+		authEmail = gitEmail
+	}
+
+	if authEmail != "" && apiToken != "" {
+		// Verify auth works
+		if _, err := fetchJiraEmail(newConfig.JiraURL, authEmail, apiToken); err == nil {
+			authOK = true
+		} else {
+			// Auth failed — ask for JIRA email
+			fmt.Printf("\nCould not authenticate to JIRA with %s.\n", authEmail)
+			var jiraEmailInput string
+			if err := survey.AskOne(&survey.Input{
+				Message: "What email do you use to log in to JIRA?",
+			}, &jiraEmailInput, survey.WithValidator(survey.Required)); err != nil {
+				fmt.Println("Setup cancelled")
+				return
+			}
+			jiraEmailInput = strings.TrimSpace(jiraEmailInput)
+
+			// Verify the provided email works
+			if _, verifyErr := fetchJiraEmail(newConfig.JiraURL, jiraEmailInput, apiToken); verifyErr == nil {
+				authOK = true
+				// Auto-create domain mapping if domains differ
+				if gitEmail != "" {
+					gitParts := strings.SplitN(gitEmail, "@", 2)
+					jiraParts := strings.SplitN(jiraEmailInput, "@", 2)
+					if len(gitParts) == 2 && len(jiraParts) == 2 && gitParts[1] != jiraParts[1] {
+						if newConfig.EmailDomainMap == nil {
+							newConfig.EmailDomainMap = make(map[string]string)
+						}
+						newConfig.EmailDomainMap[gitParts[1]] = jiraParts[1]
+						fmt.Printf("Added email domain mapping: %s → %s\n", gitParts[1], jiraParts[1])
+					}
+				}
+				authEmail = jiraEmailInput
+			} else {
+				fmt.Println("Warning: Could not authenticate with that email either.")
+			}
+		}
+	}
+
+	// Save again if email detection added a domain mapping
+	if err := usercfg.Save(newConfig); err != nil {
+		log.Fatalf("Failed to save configuration: %v", err)
+	}
+
+	// Board discovery — automatic when auth is available
+	if authOK {
+		fmt.Println("\nDiscovering project boards from JIRA...")
+		boards, err := jira.DiscoverBoards(newConfig.JiraURL, authEmail, apiToken, newConfig.Projects...)
+		if err != nil {
+			fmt.Printf("Warning: Board discovery failed: %v\n", err)
+		} else {
+			rankedBoards := jira.RankBoards(boards, newConfig.Projects)
+
+			if len(rankedBoards) > 0 {
+				var boardOptions []string
+				boardMap := make(map[string]jira.Board)
+
+				for _, board := range rankedBoards[:min(10, len(rankedBoards))] {
+					option := fmt.Sprintf("%s (ID: %d, Project: %s)", board.Name, board.ID, board.Location.ProjectKey)
+					boardOptions = append(boardOptions, option)
+					boardMap[option] = board
+				}
+
+				var selectedBoards []string
+				if err := survey.AskOne(&survey.MultiSelect{
+					Message: "Select your boards:",
+					Options: boardOptions,
+				}, &selectedBoards); err == nil {
+					if newConfig.Boards == nil {
+						newConfig.Boards = make(map[string]int)
+					}
+					for _, selected := range selectedBoards {
+						if board, ok := boardMap[selected]; ok {
+							key := fmt.Sprintf("%s_%s", board.Location.ProjectKey, strings.ToLower(board.Type))
+							newConfig.Boards[key] = board.ID
 						}
 					}
 				}
