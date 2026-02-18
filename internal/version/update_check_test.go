@@ -34,20 +34,23 @@ func TestLoadSaveCache(t *testing.T) {
 	path := filepath.Join(dir, "update_check.json")
 
 	// No file yet — should return false
-	if _, ok := loadUpdateCacheFrom(path); ok {
+	if _, _, ok := loadUpdateCacheFrom(path); ok {
 		t.Fatal("expected cache miss for nonexistent file")
 	}
 
 	// Write cache
-	saveUpdateCacheTo(path, "1.2.0")
+	saveUpdateCacheTo(path, "1.2.0", "1.1.0")
 
 	// Read it back
-	ver, ok := loadUpdateCacheFrom(path)
+	ver, checked, ok := loadUpdateCacheFrom(path)
 	if !ok {
 		t.Fatal("expected cache hit after save")
 	}
 	if ver != "1.2.0" {
 		t.Errorf("got cached version %q, want %q", ver, "1.2.0")
+	}
+	if checked != "1.1.0" {
+		t.Errorf("got checked version %q, want %q", checked, "1.1.0")
 	}
 }
 
@@ -57,15 +60,39 @@ func TestCacheExpiry(t *testing.T) {
 
 	// Write a cache entry with an old timestamp
 	cache := updateCache{
-		LatestVersion: "1.2.0",
-		Timestamp:     time.Now().Add(-25 * time.Hour),
+		LatestVersion:  "1.2.0",
+		CheckedVersion: "1.1.0",
+		Timestamp:      time.Now().Add(-25 * time.Hour),
 	}
 	data, _ := json.Marshal(cache)
 	os.WriteFile(path, data, 0644)
 
-	if _, ok := loadUpdateCacheFrom(path); ok {
+	if _, _, ok := loadUpdateCacheFrom(path); ok {
 		t.Fatal("expected cache miss for stale entry")
 	}
+}
+
+func TestCacheInvalidatedAfterUpdate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "update_check.json")
+
+	// Cache says latest=1.2.0, checked when running 1.1.0
+	saveUpdateCacheTo(path, "1.2.0", "1.1.0")
+
+	// Read cache — valid
+	ver, checked, ok := loadUpdateCacheFrom(path)
+	if !ok {
+		t.Fatal("expected cache hit")
+	}
+
+	// Simulate user updated to 1.2.0: checked version != current
+	if checked == "1.2.0" {
+		t.Fatal("checked version should be 1.1.0, not 1.2.0")
+	}
+
+	// The caller (checkForUpdate) compares checked == current.
+	// Since checked=1.1.0 != current=1.2.0, it should re-query.
+	_ = ver
 }
 
 func TestCheckForUpdate_DevBuild(t *testing.T) {
@@ -76,14 +103,14 @@ func TestCheckForUpdate_DevBuild(t *testing.T) {
 }
 
 func TestLoadCacheFrom_EmptyPath(t *testing.T) {
-	if _, ok := loadUpdateCacheFrom(""); ok {
+	if _, _, ok := loadUpdateCacheFrom(""); ok {
 		t.Fatal("expected cache miss for empty path")
 	}
 }
 
 func TestSaveCacheTo_EmptyPath(t *testing.T) {
 	// Should not panic
-	saveUpdateCacheTo("", "1.0.0")
+	saveUpdateCacheTo("", "1.0.0", "1.0.0")
 }
 
 func TestLoadCacheFrom_InvalidJSON(t *testing.T) {
@@ -91,7 +118,7 @@ func TestLoadCacheFrom_InvalidJSON(t *testing.T) {
 	path := filepath.Join(dir, "update_check.json")
 	os.WriteFile(path, []byte("not json"), 0644)
 
-	if _, ok := loadUpdateCacheFrom(path); ok {
+	if _, _, ok := loadUpdateCacheFrom(path); ok {
 		t.Fatal("expected cache miss for invalid JSON")
 	}
 }

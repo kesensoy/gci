@@ -23,8 +23,9 @@ type UpdateCheckResult struct {
 }
 
 type updateCache struct {
-	LatestVersion string    `json:"latest_version"`
-	Timestamp     time.Time `json:"timestamp"`
+	LatestVersion  string    `json:"latest_version"`
+	CheckedVersion string    `json:"checked_version"` // version that was running when we last checked
+	Timestamp      time.Time `json:"timestamp"`
 }
 
 // StartUpdateCheck launches a background goroutine that checks for updates.
@@ -44,15 +45,15 @@ func checkForUpdate(current string) string {
 		return ""
 	}
 
-	// Try cache first
-	if cached, ok := loadUpdateCache(); ok {
+	// Try cache first — but invalidate if user has updated since last check
+	if cached, checkedVer, ok := loadUpdateCache(); ok && checkedVer == current {
 		if cached != "" && isNewerThan(cached, current) {
 			return cached
 		}
 		return ""
 	}
 
-	// Cache miss or stale — query GitHub
+	// Cache miss, stale, or user updated — query GitHub
 	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
 	if err != nil {
 		return ""
@@ -72,12 +73,12 @@ func checkForUpdate(current string) string {
 	latest, found, err := updater.DetectLatest(ctx, selfupdate.ParseSlug(githubSlug))
 	if err != nil || !found {
 		// Cache current version so we don't hammer GitHub when offline
-		saveUpdateCache(current)
+		saveUpdateCache(current, current)
 		return ""
 	}
 
 	latestVer := latest.Version()
-	saveUpdateCache(latestVer)
+	saveUpdateCache(latestVer, current)
 
 	if latest.LessOrEqual(current) {
 		return ""
@@ -107,44 +108,45 @@ func updateCachePath() string {
 	return filepath.Join(homeDir, ".config", "gci", updateCacheFile)
 }
 
-func loadUpdateCache() (string, bool) {
+func loadUpdateCache() (string, string, bool) {
 	return loadUpdateCacheFrom(updateCachePath())
 }
 
-func saveUpdateCache(latestVersion string) {
-	saveUpdateCacheTo(updateCachePath(), latestVersion)
+func saveUpdateCache(latestVersion, checkedVersion string) {
+	saveUpdateCacheTo(updateCachePath(), latestVersion, checkedVersion)
 }
 
-func loadUpdateCacheFrom(path string) (string, bool) {
+func loadUpdateCacheFrom(path string) (string, string, bool) {
 	if path == "" {
-		return "", false
+		return "", "", false
 	}
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 
 	var cache updateCache
 	if err := json.Unmarshal(data, &cache); err != nil {
-		return "", false
+		return "", "", false
 	}
 
 	if time.Since(cache.Timestamp) > updateCheckTTL {
-		return "", false
+		return "", "", false
 	}
 
-	return cache.LatestVersion, true
+	return cache.LatestVersion, cache.CheckedVersion, true
 }
 
-func saveUpdateCacheTo(path string, latestVersion string) {
+func saveUpdateCacheTo(path string, latestVersion, checkedVersion string) {
 	if path == "" {
 		return
 	}
 
 	cache := updateCache{
-		LatestVersion: latestVersion,
-		Timestamp:     time.Now(),
+		LatestVersion:  latestVersion,
+		CheckedVersion: checkedVersion,
+		Timestamp:      time.Now(),
 	}
 
 	data, err := json.Marshal(cache)
