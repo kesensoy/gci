@@ -29,6 +29,9 @@ cd "$SCRIPT_DIR"
 
 echo -e "${YELLOW}Building binary...${NC}"
 
+# Fetch tags from remote so version reflects the latest release
+git fetch --tags --quiet 2>/dev/null || true
+
 # Inject version from git tag if available, otherwise "dev"
 GIT_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "dev")
 GIT_VERSION="${GIT_VERSION#v}"  # strip leading v
