@@ -91,12 +91,31 @@ type Config struct {
 	EnableWorktrees bool
 }
 
+var updateCheckCh <-chan version.UpdateCheckResult
+
 var rootCmd = &cobra.Command{
 	Use:   "gci",
 	Short: "Create Git branch from JIRA issue",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// Set verbose logging based on flag
 		logger.SetVerbose(verbose)
+
+		name := cmd.Name()
+		if name != "update" && name != "version" {
+			updateCheckCh = version.StartUpdateCheck()
+		}
+	},
+	PersistentPostRun: func(cmd *cobra.Command, args []string) {
+		if updateCheckCh == nil {
+			return
+		}
+		select {
+		case result := <-updateCheckCh:
+			if result.NewVersion != "" {
+				fmt.Fprintf(os.Stderr, "\n\033[33mA new version of gci is available: %s (current: %s)\033[0m\n", result.NewVersion, version.GetShortVersion())
+				fmt.Fprintf(os.Stderr, "\033[33mRun 'gci update' to upgrade.\033[0m\n")
+			}
+		case <-time.After(500 * time.Millisecond):
+		}
 	},
 	Run: runGCI,
 }
