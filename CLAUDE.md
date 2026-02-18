@@ -79,21 +79,28 @@ Core features:
 - **Branch mode** (`b` key): creates/checkouts branch for selected issue
 - **Interactive Mode** (`Enter` key): configurable workflow (worktrees + Claude optional)
 - **Reverse workflow** (`gci create`): generate JIRA ticket from current changes using Claude, auto-rename branch
+- **Config management** (`gci config`): subcommands `doctor`, `print`, `path`, `get`, `set`, `migrate`
 - **Optional Claude integration**: `enable_claude` config; auto-detected during setup
 - **Optional worktrees**: `enable_worktrees` config; controls Interactive Mode behavior
+- **Background update check**: non-blocking notification after commands when a newer release exists; cached at `~/.config/gci/update_check.json`
 - Hardcoded dark theme, vim-style keys, always-on fuzzy search
 
 Repo map:
-- `internal/usercfg/` - config, defaults, fuzzy search
-- `internal/jira/` - discovery, board API
-- `main.go` - CLI commands, worktree functions, Claude spawn, branch naming, `gci create`
-- `board_tui.go` - Kanban TUI, hardcoded styles/keys, Interactive Mode (Enter key)
+- `internal/usercfg/` — config loading, defaults, fuzzy search, schema migration
+- `internal/jira/` — board discovery (with project filtering), board API
+- `internal/version/` — version info, self-update, background update check with cache
+- `internal/errors/` — sentinel errors (`ErrNotConfigured`)
+- `internal/httputil/` — HTTP client helpers
+- `internal/logger/` — structured logging
+- `main.go` — CLI commands, worktree functions, Claude spawn, branch naming, `gci create`
+- `board_tui.go` — Kanban TUI, hardcoded styles/keys, Interactive Mode (Enter key)
 
 
 ### Configuration schema
 
 `~/.config/gci/config.toml`:
 ```toml
+schema_version = 1
 projects = ["PROJ1", "PROJ2"]
 default_scope = "assigned_or_reported"  # assigned_or_reported|assigned|reported|unassigned
 jira_url = "https://your-company.atlassian.net"
@@ -103,6 +110,10 @@ enable_worktrees = true   # enables git worktrees for Interactive Mode (Enter ke
 [boards]
 PROJ1_kanban = 123
 PROJ2_scrum = 456
+
+[ui_prefs]
+fuzzy_search = true
+show_extra_fields = false
 
 # Optional: 1Password path for JIRA API token
 # op_jira_token_path = "op://VaultName/ItemName/credential"

@@ -57,6 +57,17 @@ gci -p MYPROJECT   # filter to one project
 gci board
 ```
 
+### Manage Configuration
+
+```bash
+gci config doctor    # check config health and connectivity
+gci config print     # display current config
+gci config path      # show config file location
+gci config get KEY   # get a specific config value
+gci config set KEY VALUE  # set a config value
+gci config migrate   # migrate config to latest schema
+```
+
 ### Create a Ticket (Reverse Workflow)
 
 Already started work and need a ticket? `gci create` analyzes your branch's changes, uses Claude to suggest a title and description, creates the JIRA issue, and renames your branch to match.
@@ -118,6 +129,7 @@ Or press `w` in the board view. The wizard walks through projects, JIRA URL, boa
 `~/.config/gci/config.toml`:
 
 ```toml
+schema_version = 1
 projects = ["MYPROJECT", "INFRA"]
 default_scope = "assigned_or_reported"
 jira_url = "https://your-company.atlassian.net"
