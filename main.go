@@ -1438,6 +1438,34 @@ func runSetup(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Warn if op CLI is not installed but user wants 1Password
+	if configureOP {
+		if _, err := exec.LookPath("op"); err != nil {
+			fmt.Println()
+			fmt.Println("  Warning: 1Password CLI (op) is not installed.")
+			fmt.Println("  Install it from: https://developer.1password.com/docs/cli/get-started/")
+			fmt.Println()
+			fmt.Println("  You can still configure 1Password now and install the CLI later,")
+			fmt.Println("  or skip this step and use the JIRA_API_TOKEN environment variable instead.")
+			fmt.Println()
+
+			var continueOP bool
+			if err := survey.AskOne(&survey.Confirm{
+				Message: "Continue with 1Password setup anyway?",
+				Default: false,
+			}, &continueOP); err != nil {
+				fmt.Println("Setup cancelled")
+				return
+			}
+			if !continueOP {
+				fmt.Println()
+				fmt.Println("  Skipped 1Password setup.")
+				fmt.Println("  Set JIRA_API_TOKEN as an environment variable to authenticate.")
+				configureOP = false
+			}
+		}
+	}
+
 	if configureOP {
 		fmt.Println()
 		fmt.Println("  To store your JIRA API token in 1Password:")
@@ -1858,6 +1886,18 @@ func runConfigDoctor(cmd *cobra.Command, args []string) {
 
 func runVersion(cmd *cobra.Command, args []string) {
 	fmt.Println(version.GetVersionString())
+
+	// Check for available updates (synchronous since user is asking about version)
+	ch := version.StartUpdateCheck()
+	select {
+	case result := <-ch:
+		if result.NewVersion != "" {
+			fmt.Printf("\n\033[33mUpdate available: %s (current: %s)\033[0m\n", result.NewVersion, version.GetShortVersion())
+			fmt.Println("\033[33mRun 'gci update' to upgrade.\033[0m")
+		}
+	case <-time.After(5 * time.Second):
+		// Don't block forever if GitHub is slow
+	}
 }
 
 func runUpdate(cmd *cobra.Command, args []string) {
