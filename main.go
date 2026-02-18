@@ -1907,7 +1907,7 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
+	source, err := version.NewPublicGitHubSource()
 	if err != nil {
 		fmt.Printf("Failed to create update source: %v\n", err)
 		return

@@ -54,7 +54,7 @@ func checkForUpdate(current string) string {
 	}
 
 	// Cache miss, stale, or user updated — query GitHub
-	source, err := selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
+	source, err := NewPublicGitHubSource()
 	if err != nil {
 		return ""
 	}
@@ -84,6 +84,18 @@ func checkForUpdate(current string) string {
 		return ""
 	}
 	return latestVer
+}
+
+// NewPublicGitHubSource creates a GitHubSource that ignores any
+// GITHUB_TOKEN in the environment. gci's repo is public and never
+// needs auth; a stale token would cause a 401.
+func NewPublicGitHubSource() (*selfupdate.GitHubSource, error) {
+	token := os.Getenv("GITHUB_TOKEN")
+	if token != "" {
+		os.Unsetenv("GITHUB_TOKEN")
+		defer os.Setenv("GITHUB_TOKEN", token)
+	}
+	return selfupdate.NewGitHubSource(selfupdate.GitHubConfig{})
 }
 
 func isNewerThan(latest, current string) bool {
