@@ -1136,6 +1136,82 @@ func runCreate(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	// Offer to commit and push changes
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOut, _ := statusCmd.Output()
+	changedFiles := []string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(statusOut)), "\n") {
+		if line == "" {
+			continue
+		}
+		// porcelain format: XY filename (or XY -> renamed)
+		file := strings.TrimSpace(line)
+		if len(file) > 3 {
+			file = strings.TrimSpace(file[2:])
+		}
+		changedFiles = append(changedFiles, file)
+	}
+
+	if len(changedFiles) > 0 {
+		commitMsg := fmt.Sprintf("%s: %s", issueKey, title)
+		fmt.Printf("\n  Commit message: %s\n", commitMsg)
+
+		var action string
+		if err := survey.AskOne(&survey.Select{
+			Message: fmt.Sprintf("Commit and push %d changed file(s) to origin?", len(changedFiles)),
+			Options: []string{"Yes, all files", "Select files...", "No"},
+			Default: "Yes, all files",
+		}, &action); err != nil {
+			fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
+			return
+		}
+
+		var filesToStage []string
+		switch action {
+		case "Yes, all files":
+			filesToStage = changedFiles
+		case "Select files...":
+			if err := survey.AskOne(&survey.MultiSelect{
+				Message: "Select files to commit:",
+				Options: changedFiles,
+			}, &filesToStage); err != nil || len(filesToStage) == 0 {
+				fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
+				return
+			}
+		default:
+			fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
+			return
+		}
+
+		// Stage selected files
+		addArgs := append([]string{"add", "--"}, filesToStage...)
+		addCmd := exec.Command("git", addArgs...)
+		if out, err := addCmd.CombinedOutput(); err != nil {
+			fmt.Printf("\033[91mFailed to stage files: %s\033[0m\n", strings.TrimSpace(string(out)))
+			fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
+			return
+		}
+
+		// Commit
+		commitCmd := exec.Command("git", "commit", "-m", commitMsg)
+		if out, err := commitCmd.CombinedOutput(); err != nil {
+			fmt.Printf("\033[91mCommit failed: %s\033[0m\n", strings.TrimSpace(string(out)))
+			fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
+			return
+		}
+		fmt.Printf("\033[92mCommitted.\033[0m\n")
+
+		// Push
+		currentBranchNow := getCurrentBranch()
+		pushCmd := exec.Command("git", "push", "-u", "origin", currentBranchNow)
+		if out, err := pushCmd.CombinedOutput(); err != nil {
+			fmt.Printf("\033[91mPush failed: %s\033[0m\n", strings.TrimSpace(string(out)))
+		} else {
+			fmt.Printf("\033[92mPushed to origin/%s.\033[0m\n", currentBranchNow)
+			_ = out
+		}
+	}
+
 	fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
 }
 
