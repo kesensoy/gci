@@ -87,6 +87,7 @@ type Config struct {
 	APIToken        string
 	Projects        []string
 	All             bool
+	DefaultScope    string
 	EnableClaude    bool
 	EnableWorktrees bool
 }
@@ -403,6 +404,7 @@ func loadConfig() (*Config, error) {
 		APIToken:        apiToken,
 		Projects:        projects,
 		All:             allFlag,
+		DefaultScope:    userConfig.DefaultScope,
 		EnableClaude:    userConfig.ClaudeEnabled(),
 		EnableWorktrees: userConfig.WorktreesEnabled(),
 	}, nil
@@ -471,25 +473,22 @@ func fetchJiraEmail(jiraURL, authEmail, token string) (string, error) {
 
 func fetchIssues(config *Config) ([]JiraIssue, error) {
 	// Build project filter
-	var projectFilter string
-	if len(config.Projects) == 1 {
-		projectFilter = fmt.Sprintf("project = %s", config.Projects[0])
-	} else {
-		projectFilter = fmt.Sprintf("project in (%s)", strings.Join(config.Projects, ", "))
-	}
+	projectFilter := buildProjectFilter(config.Projects)
 
-	// Build JQL query
+	// Build JQL query with scope filter
 	var jql string
 	if config.All {
 		jql = fmt.Sprintf("%s AND (status = Open OR status = \"In Progress\" OR status = \"Change Approved\") ORDER BY created", projectFilter)
 	} else {
-		jql = fmt.Sprintf("%s AND (status = Open OR status = \"In Progress\" OR status = \"Change Approved\") AND reporter in (currentUser()) ORDER BY created", projectFilter)
+		scope := parseScopeFilter(config.DefaultScope)
+		scopePredicate := buildScopePredicate(scope)
+		jql = fmt.Sprintf("%s AND (status = Open OR status = \"In Progress\" OR status = \"Change Approved\") AND %s ORDER BY created", projectFilter, scopePredicate)
 	}
 
 	// Make HTTP request with context and retry
 	ctx, cancel := context.WithTimeout(context.Background(), httputil.DefaultTimeout)
 	defer cancel()
-	
+
 	client := httputil.NewDefaultClient()
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/rest/api/3/search/jql", config.JiraURL), nil)
 	if err != nil {
@@ -1228,6 +1227,22 @@ const (
 	scopeReported                          // reported by me
 	scopeUnassigned                        // unassigned in team backlog
 )
+
+// parseScopeFilter converts a string scope to scopeFilter enum
+func parseScopeFilter(scope string) scopeFilter {
+	switch scope {
+	case "assigned":
+		return scopeMine
+	case "reported":
+		return scopeReported
+	case "unassigned":
+		return scopeUnassigned
+	case "assigned_or_reported":
+		return scopeMineOrReported
+	default:
+		return scopeMineOrReported // Default fallback
+	}
+}
 
 // kanbanColumn represents a logical column backed by a JQL filter on statusCategory
 type kanbanColumn struct {
