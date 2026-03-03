@@ -631,44 +631,46 @@ func spawnClaudeWithContext(worktreePath string, issue JiraIssue) error {
 }
 
 func createOrCheckoutBranch(branchName string) error {
-	// Check for uncommitted changes that would block checkout
-	statusCmd := exec.Command("git", "status", "--porcelain")
-	statusOut, _ := statusCmd.Output()
-	if len(strings.TrimSpace(string(statusOut))) > 0 {
-		fmt.Printf("\033[93mYou have uncommitted changes.\033[0m\n")
-		var doStash bool
-		if err := survey.AskOne(&survey.Confirm{
-			Message: "Stash changes and continue?",
-			Default: true,
-		}, &doStash); err != nil || !doStash {
-			return fmt.Errorf("branch switch cancelled: uncommitted changes")
-		}
-		stashCmd := exec.Command("git", "stash", "push", "-m", fmt.Sprintf("gci: auto-stash before switching to %s", branchName))
-		if out, err := stashCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git stash failed: %s", strings.TrimSpace(string(out)))
-		}
-		fmt.Printf("\033[92mChanges stashed.\033[0m\n")
-	}
-
-	// Check if branch exists
+	// Check if branch already exists
 	checkCmd := exec.Command("git", "rev-parse", "--verify", branchName)
-	if err := checkCmd.Run(); err == nil {
-		// Branch exists, checkout
+	branchExists := checkCmd.Run() == nil
+
+	// Only stash if checking out an existing branch — creating a new branch
+	// with "git checkout -b" carries uncommitted changes automatically.
+	if branchExists {
+		statusCmd := exec.Command("git", "status", "--porcelain")
+		statusOut, _ := statusCmd.Output()
+		if len(strings.TrimSpace(string(statusOut))) > 0 {
+			fmt.Printf("\033[93mYou have uncommitted changes.\033[0m\n")
+			var doStash bool
+			if err := survey.AskOne(&survey.Confirm{
+				Message: "Stash changes and continue?",
+				Default: true,
+			}, &doStash); err != nil || !doStash {
+				return fmt.Errorf("branch switch cancelled: uncommitted changes")
+			}
+			stashCmd := exec.Command("git", "stash", "push", "-m", fmt.Sprintf("gci: auto-stash before switching to %s", branchName))
+			if out, err := stashCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("git stash failed: %s", strings.TrimSpace(string(out)))
+			}
+			fmt.Printf("\033[92mChanges stashed.\033[0m\n")
+		}
+
 		fmt.Printf("\033[92mBranch \"%s\" already exists. Checking out the branch.\033[0m\n", branchName)
 		checkoutCmd := exec.Command("git", "checkout", branchName)
 		if out, err := checkoutCmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("git checkout failed: %s", strings.TrimSpace(string(out)))
 		}
 		return nil
-	} else {
-		// Branch doesn't exist, create and checkout
-		fmt.Printf("\033[92mCreating and checking out branch \"%s\".\033[0m\n", branchName)
-		createCmd := exec.Command("git", "checkout", "-b", branchName)
-		if out, err := createCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("git checkout -b failed: %s", strings.TrimSpace(string(out)))
-		}
-		return nil
 	}
+
+	// Branch doesn't exist — create and checkout (uncommitted changes carry over)
+	fmt.Printf("\033[92mCreating and checking out branch \"%s\".\033[0m\n", branchName)
+	createCmd := exec.Command("git", "checkout", "-b", branchName)
+	if out, err := createCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git checkout -b failed: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // openIssueInBrowser opens the selected issue in the default browser
