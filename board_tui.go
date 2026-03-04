@@ -9,6 +9,7 @@ import (
 
 	"gci/internal/usercfg"
 
+	"github.com/atotto/clipboard"
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -29,6 +30,8 @@ type dataLoadedMsg struct {
 }
 
 type errMsg struct{ err error }
+
+type clearStatusMsg struct{}
 
 // lazyBatchLoadedMsg contains background-fetched data for a specific scope across columns
 type lazyBatchLoadedMsg struct {
@@ -55,6 +58,8 @@ type boardModel struct {
 	pendingWorktree string
 	pendingIssue    JiraIssue
 	pendingClaude   bool // whether to spawn Claude after TUI exits
+	statusMsg       string
+	statusClearAt   time.Time
 }
 
 // newBoardStyles returns hardcoded dark theme styles
@@ -577,6 +582,18 @@ func (m boardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if issue, ok := m.currentIssue(); ok {
 				_ = openIssueInBrowser(m.cfg, issue)
 			}
+		case key == "c":
+			if issue, ok := m.currentIssue(); ok {
+				if err := clipboard.WriteAll(issue.Key); err != nil {
+					m.statusMsg = "Copy failed: " + err.Error()
+				} else {
+					m.statusMsg = "Copied " + issue.Key
+				}
+				m.statusClearAt = time.Now().Add(2 * time.Second)
+				return m, tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+					return clearStatusMsg{}
+				})
+			}
 		case key == "b":
 			// If filtered results are in a different column, jump there
 			if _, ok := m.currentIssue(); !ok {
@@ -728,6 +745,11 @@ func (m boardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		m.err = msg.err
 		return m, nil
+	case clearStatusMsg:
+		if time.Now().After(m.statusClearAt) || time.Now().Equal(m.statusClearAt) {
+			m.statusMsg = ""
+		}
+		return m, nil
 	}
 	return m, nil
 }
@@ -738,7 +760,11 @@ func (m boardModel) View() string {
 
 	header := m.styles.header.Render(clip(fmt.Sprintf("Personal Kanban — Projects: %s — %s", strings.Join(m.cfg.Projects, ","), modeStr), m.width))
 	// Compact help to avoid overflowing small terminals; full help with '?'
-	help := m.styles.help.Render(clip("(? help • q quit • arrows/hjkl move • / filter • b branch • enter interactive)", m.width))
+	helpText := "(? help • q quit • arrows/hjkl move • / filter • b branch • c copy • enter interactive)"
+	if m.statusMsg != "" {
+		helpText = m.statusMsg
+	}
+	help := m.styles.help.Render(clip(helpText, m.width))
 
 	cols := len(m.columns)
 	if cols == 0 {
@@ -1004,6 +1030,7 @@ func (m boardModel) buildHelpContent() string {
 		m.styles.helpKey.Render("s") + "           Cycle scope (assigned/reported/unassigned)",
 		m.styles.helpKey.Render("/") + "           Filter issues (live search)",
 		m.styles.helpKey.Render("o") + "           Open selected issue in browser",
+		m.styles.helpKey.Render("c") + "           Copy issue key to clipboard",
 		m.styles.helpKey.Render("b") + "           Create/checkout branch for issue",
 		m.styles.helpKey.Render("enter") + "       Interactive Mode",
 		m.styles.helpKey.Render("w") + "           Open setup wizard",
