@@ -30,27 +30,40 @@ type updateCache struct {
 
 // StartUpdateCheck launches a background goroutine that checks for updates.
 // Returns a channel that will receive exactly one result.
+// Uses cached results when available to avoid hitting GitHub on every command.
 func StartUpdateCheck() <-chan UpdateCheckResult {
+	return startUpdateCheck(false)
+}
+
+// StartFreshUpdateCheck is like StartUpdateCheck but bypasses the cache,
+// always querying GitHub. Use this for explicit version checks.
+func StartFreshUpdateCheck() <-chan UpdateCheckResult {
+	return startUpdateCheck(true)
+}
+
+func startUpdateCheck(skipCache bool) <-chan UpdateCheckResult {
 	ch := make(chan UpdateCheckResult, 1)
 	go func() {
 		defer close(ch)
-		newVer := checkForUpdate(GetShortVersion())
+		newVer := checkForUpdate(GetShortVersion(), skipCache)
 		ch <- UpdateCheckResult{NewVersion: newVer}
 	}()
 	return ch
 }
 
-func checkForUpdate(current string) string {
+func checkForUpdate(current string, skipCache bool) string {
 	if current == "dev" {
 		return ""
 	}
 
 	// Try cache first — but invalidate if user has updated since last check
-	if cached, checkedVer, ok := loadUpdateCache(); ok && checkedVer == current {
-		if cached != "" && isNewerThan(cached, current) {
-			return cached
+	if !skipCache {
+		if cached, checkedVer, ok := loadUpdateCache(); ok && checkedVer == current {
+			if cached != "" && isNewerThan(cached, current) {
+				return cached
+			}
+			return ""
 		}
-		return ""
 	}
 
 	// Cache miss, stale, or user updated — query GitHub

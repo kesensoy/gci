@@ -1980,8 +1980,8 @@ func runConfigDoctor(cmd *cobra.Command, args []string) {
 func runVersion(cmd *cobra.Command, args []string) {
 	fmt.Println(version.GetVersionString())
 
-	// Check for available updates (synchronous since user is asking about version)
-	ch := version.StartUpdateCheck()
+	// Check for available updates (fresh check since user explicitly asked)
+	ch := version.StartFreshUpdateCheck()
 	select {
 	case result := <-ch:
 		if result.NewVersion != "" {

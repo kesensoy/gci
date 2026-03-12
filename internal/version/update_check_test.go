@@ -96,7 +96,7 @@ func TestCacheInvalidatedAfterUpdate(t *testing.T) {
 }
 
 func TestCheckForUpdate_DevBuild(t *testing.T) {
-	result := checkForUpdate("dev")
+	result := checkForUpdate("dev", false)
 	if result != "" {
 		t.Errorf("expected empty result for dev build, got %q", result)
 	}
