@@ -331,14 +331,7 @@ func loadConfig() (*Config, error) {
 
 	// Guard: require configuration
 	if userConfig.JiraURL == "" || len(userConfig.Projects) == 0 {
-		fmt.Println("GCI is not configured yet.")
-		fmt.Println()
-		fmt.Println("Run:  gci setup")
-		fmt.Println()
-		fmt.Println("Or set environment variables:")
-		fmt.Println("  GCI_JIRA_URL=https://your-company.atlassian.net")
-		fmt.Println("  GCI_PROJECTS=PROJ1,PROJ2")
-		os.Exit(1)
+		return nil, fmt.Errorf("GCI is not configured yet.\n\nRun:  gci setup\n\nOr set environment variables:\n  GCI_JIRA_URL=https://your-company.atlassian.net\n  GCI_PROJECTS=PROJ1,PROJ2")
 	}
 
 	// Get email from git config
@@ -620,7 +613,8 @@ func spawnClaudeWithContext(worktreePath string, issue JiraIssue) error {
 		issue.Fields.Summary,
 		description)
 
-	cmd := exec.Command("claude", prompt)
+	// Use "--" to prevent JIRA content from being interpreted as flags
+	cmd := exec.Command("claude", "--", prompt)
 	cmd.Dir = worktreePath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -1287,43 +1281,9 @@ func getFieldsList() string {
 
 // fetchColumnIssues fetches up to maxResults issues for a given statusCategory + scope
 func fetchColumnIssues(config *Config, statusCategory string, scope scopeFilter, maxResults int) ([]JiraIssue, error) {
-	projectFilter := buildProjectFilter(config.Projects)
-	scopePredicate := buildScopePredicate(scope)
-
-	var predicates []string
-	predicates = append(predicates, projectFilter)
-	predicates = append(predicates, fmt.Sprintf("statusCategory = \"%s\"", statusCategory))
-	if scopePredicate != "" {
-		predicates = append(predicates, scopePredicate)
-	}
-	jql := strings.Join(predicates, " AND ") + " ORDER BY updated DESC"
-
 	ctx, cancel := context.WithTimeout(context.Background(), httputil.DefaultTimeout)
 	defer cancel()
-	
-	client := httputil.NewDefaultClient()
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/rest/api/3/search/jql", config.JiraURL), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.SetBasicAuth(config.Email, config.APIToken)
-	req.Header.Set("Accept", "application/json")
-	q := req.URL.Query()
-	q.Add("jql", jql)
-	q.Add("maxResults", fmt.Sprintf("%d", maxResults))
-	q.Add("fields", getFieldsList())
-	req.URL.RawQuery = q.Encode()
-
-	logger.HTTP("GET", req.URL.String())
-	
-	var jiraResp JiraResponse
-	if err := client.DoJSONRequest(ctx, req, &jiraResp); err != nil {
-		logger.JIRA("request failed: %v", err)
-		return nil, errors.WrapWithContext(err, "jira_connection")
-	}
-	
-	logger.JIRA("Fetched %d issues for statusCategory=%q scope=%q", len(jiraResp.Issues), statusCategory, scopeToString(scope))
-	return jiraResp.Issues, nil
+	return fetchColumnIssuesWithContext(ctx, config, statusCategory, scope, maxResults)
 }
 
 // fetchColumnIssuesWithContext fetches column issues with a provided context for cancellation
@@ -2044,11 +2004,4 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	}
 
 	fmt.Printf("Updated to %s\n", latest.Version())
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

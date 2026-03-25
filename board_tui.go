@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -317,13 +318,9 @@ func (m boardModel) filterAndGroupColumn(title string, all []JiraIssue, filter s
 		}
 	}
 	// Sort by score (highest first)
-	for i := 0; i < len(scored)-1; i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].score > scored[i].score {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
-		}
-	}
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
 	result := make([]JiraIssue, len(scored))
 	for i, s := range scored {
 		result[i] = s.issue

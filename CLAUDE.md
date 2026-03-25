@@ -130,7 +130,7 @@ show_extra_fields = false
 - `branch_name_template` (kebab-case hardcoded)
 
 Notes:
-- Discovery results are cached at `~/.config/gci_boards_cache.json`.
+- Discovery results are cached at `~/.config/gci/boards_cache.json`.
 
 Loading order and fallbacks:
 - Runtime config (TOML) → env var overlays → `ErrNotConfigured` if no config exists.

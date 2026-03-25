@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -72,7 +73,7 @@ func getCacheFilePath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(homeDir, ".config", "gci_boards_cache.json")
+	return filepath.Join(homeDir, ".config", "gci", "boards_cache.json")
 }
 
 func loadFromCache(cacheFile string) ([]BoardWithActivity, bool) {
@@ -112,8 +113,8 @@ func saveToCache(cacheFile string, boards []BoardWithActivity) {
 		return
 	}
 
-	os.MkdirAll(filepath.Dir(cacheFile), 0755)
-	os.WriteFile(cacheFile, data, 0644)
+	os.MkdirAll(filepath.Dir(cacheFile), 0700)
+	os.WriteFile(cacheFile, data, 0600)
 }
 
 // FetchBoardsFromAPI is an exported wrapper for testing
@@ -317,15 +318,13 @@ func RankBoards(boards []Board, currentProjects []string) []Board {
 		}{board, score}
 	}
 
-	// Sort by score (deterministic - uses board ID as tiebreaker for consistency)
-	for i := 0; i < len(scored)-1; i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[i].score < scored[j].score || 
-			   (scored[i].score == scored[j].score && scored[i].board.ID > scored[j].board.ID) {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
+	// Sort by score descending (deterministic - uses board ID as tiebreaker for consistency)
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
 		}
-	}
+		return scored[i].board.ID < scored[j].board.ID
+	})
 
 	result := make([]Board, len(scored))
 	for i, s := range scored {

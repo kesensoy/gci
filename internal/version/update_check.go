@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	semver "github.com/Masterminds/semver/v3"
@@ -99,10 +100,17 @@ func checkForUpdate(current string, skipCache bool) string {
 	return latestVer
 }
 
+// envMu serialises access to GITHUB_TOKEN so the temporary unset/restore
+// in NewPublicGitHubSource cannot race with concurrent goroutines.
+var envMu sync.Mutex
+
 // NewPublicGitHubSource creates a GitHubSource that ignores any
 // GITHUB_TOKEN in the environment. gci's repo is public and never
 // needs auth; a stale token would cause a 401.
 func NewPublicGitHubSource() (*selfupdate.GitHubSource, error) {
+	envMu.Lock()
+	defer envMu.Unlock()
+
 	token := os.Getenv("GITHUB_TOKEN")
 	if token != "" {
 		os.Unsetenv("GITHUB_TOKEN")
@@ -179,6 +187,6 @@ func saveUpdateCacheTo(path string, latestVersion, checkedVersion string) {
 		return
 	}
 
-	os.MkdirAll(filepath.Dir(path), 0755)
-	os.WriteFile(path, data, 0644)
+	os.MkdirAll(filepath.Dir(path), 0700)
+	os.WriteFile(path, data, 0600)
 }

@@ -86,31 +86,13 @@ func NewJiraConnectionError(err error) *UserError {
 	}
 }
 
-func NewJQLPresetError(preset string, err error) *UserError {
-	return &UserError{
-		Title:       "❌ JQL Preset Error",
-		Message:     fmt.Sprintf("JQL preset '%s' failed to execute.", preset),
-		Remediation: "Check your JQL syntax in the config file. Run: gci config get jql_presets",
-		Cause:       err,
-	}
-}
-
-func NewJQLPresetNotFoundError(preset string) *UserError {
-	return &UserError{
-		Title:       "❌ JQL Preset Not Found",
-		Message:     fmt.Sprintf("JQL preset '%s' is not configured.", preset),
-		Remediation: "Run: gci config print to see available presets, or gci setup to configure them",
-		Cause:       nil,
-	}
-}
-
 func NewConfigError(operation string, err error) *UserError {
 	var remediation string
 	errStr := err.Error()
 	
 	switch {
 	case strings.Contains(errStr, "permission denied"):
-		remediation = "Check file permissions. Run: chmod 644 ~/.config/gci/config.toml"
+		remediation = "Check file permissions. Run: chmod 600 ~/.config/gci/config.toml"
 	case strings.Contains(errStr, "no such file"):
 		remediation = "Run: gci setup to create a configuration file"
 	case strings.Contains(errStr, "decode") || strings.Contains(errStr, "parse"):
