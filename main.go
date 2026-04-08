@@ -1136,7 +1136,15 @@ func runCreate(cmd *cobra.Command, args []string) {
 	}
 
 	// Offer to commit and push changes
+	// Resolve repo root so git commands work from any subdirectory
+	topCmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	topOut, err := topCmd.Output()
+	repoRoot := strings.TrimSpace(string(topOut))
+	if err != nil || repoRoot == "" {
+		repoRoot = "" // fall back to CWD
+	}
 	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusCmd.Dir = repoRoot
 	statusOut, _ := statusCmd.Output()
 	changedFiles := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(statusOut)), "\n") {
@@ -1182,9 +1190,10 @@ func runCreate(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		// Stage selected files
+		// Stage selected files (from repo root so porcelain paths resolve)
 		addArgs := append([]string{"add", "--"}, filesToStage...)
 		addCmd := exec.Command("git", addArgs...)
+		addCmd.Dir = repoRoot
 		if out, err := addCmd.CombinedOutput(); err != nil {
 			fmt.Printf("\033[91mFailed to stage files: %s\033[0m\n", strings.TrimSpace(string(out)))
 			fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
@@ -1193,6 +1202,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 
 		// Commit
 		commitCmd := exec.Command("git", "commit", "-m", commitMsg)
+		commitCmd.Dir = repoRoot
 		if out, err := commitCmd.CombinedOutput(); err != nil {
 			fmt.Printf("\033[91mCommit failed: %s\033[0m\n", strings.TrimSpace(string(out)))
 			fmt.Printf("\nView: %s/browse/%s\n", config.JiraURL, issueKey)
@@ -1203,6 +1213,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 		// Push
 		currentBranchNow := getCurrentBranch()
 		pushCmd := exec.Command("git", "push", "-u", "origin", currentBranchNow)
+		pushCmd.Dir = repoRoot
 		if out, err := pushCmd.CombinedOutput(); err != nil {
 			fmt.Printf("\033[91mPush failed: %s\033[0m\n", strings.TrimSpace(string(out)))
 		} else {
