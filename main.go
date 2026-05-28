@@ -459,6 +459,9 @@ func probeJiraAuth(jiraURL, email, token string) authProbeResult {
 		return authProbeResult{Status: authProbeNetworkError, Email: email, Detail: err.Error()}
 	}
 	defer resp.Body.Close()
+	// Drain the body so the transport can return the connection to the pool;
+	// idiomatic even though this short-lived diagnostic client does not reuse it.
+	io.Copy(io.Discard, resp.Body)
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -496,29 +499,13 @@ func resolveJiraCreds(userConfig usercfg.Config) (email, token, tokenSource stri
 	return email, "", "no token source configured"
 }
 
-// isJiraTokenValid checks if the given email/token can authenticate to Jira by calling /myself
+// isJiraTokenValid checks if the given email/token can authenticate to Jira by calling /myself.
+// It delegates to probeJiraAuth so the actual HTTP probe logic lives in one place.
 func isJiraTokenValid(jiraURL, email, token string) bool {
-	if jiraURL == "" || email == "" || token == "" {
+	if jiraURL == "" {
 		return false
 	}
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	
-	client := httputil.NewRetryableClient(5*time.Second, 1) // Quick validation, minimal retries
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/rest/api/3/myself", jiraURL), nil)
-	if err != nil {
-		return false
-	}
-	req.SetBasicAuth(email, token)
-	req.Header.Set("Accept", "application/json")
-	
-	resp, err := client.DoWithRetry(ctx, req)
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	return probeJiraAuth(jiraURL, email, token).Status == authProbeOK
 }
 
 // fetchJiraEmail calls /rest/api/3/myself and returns the account's email address.
