@@ -69,7 +69,7 @@ func NewJiraConnectionError(err error) *UserError {
 	var remediation string
 	
 	if strings.Contains(errStr, "401") || strings.Contains(errStr, "Unauthorized") {
-		remediation = "Your Atlassian API token is rejected (often expired — Atlassian ages tokens out automatically). Create a new classic (unscoped) token at https://id.atlassian.com/manage-profile/security/api-tokens, store it in 1Password, then verify with: gci config doctor"
+		remediation = "Atlassian rejected your API token. Create a new classic (unscoped) token at https://id.atlassian.com/manage-profile/security/api-tokens, update your token source, then run: gci config doctor"
 	} else if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "no such host") {
 		remediation = "Check your internet connection and JIRA URL. Run: gci config doctor"
 	} else if strings.Contains(errStr, "403") || strings.Contains(errStr, "Forbidden") {
@@ -142,7 +142,7 @@ func NewHttpError(statusCode int, body string) *UserError {
 	switch {
 	case statusCode == 401:
 		title = "❌ Authentication Failed"
-		remediation = "Your Atlassian API token is rejected (often expired — Atlassian ages tokens out automatically). Create a new classic (unscoped) token at https://id.atlassian.com/manage-profile/security/api-tokens, store it in 1Password, then verify with: gci config doctor"
+		remediation = "Atlassian rejected your API token. Create a new classic (unscoped) token at https://id.atlassian.com/manage-profile/security/api-tokens, update your token source, then run: gci config doctor"
 	case statusCode == 403:
 		title = "❌ Access Forbidden" 
 		remediation = "Your account lacks permission for this operation. Contact your JIRA administrator"

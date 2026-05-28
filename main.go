@@ -2088,11 +2088,11 @@ func runConfigDoctor(cmd *cobra.Command, args []string) {
 				fmt.Printf("✅ JIRA authentication OK (%s, token from %s)\n", email, tokenSource)
 			case authProbeUnauthorized:
 				fmt.Printf("❌ JIRA returned 401 for %s (token from %s)\n", email, tokenSource)
-				fmt.Println("   The API token is rejected. Atlassian ages tokens out automatically;")
-				fmt.Println("   tokens issued before 2024-12-15 expire between 2026-03-14 and 2026-05-12.")
+				fmt.Println("   Atlassian rejected the token. Common cause: expiry — Atlassian assigns")
+				fmt.Println("   expiry dates to API tokens automatically.")
 				fmt.Println("   Create a new classic (unscoped) token at:")
 				fmt.Println("     https://id.atlassian.com/manage-profile/security/api-tokens")
-				fmt.Println("   then update the value in 1Password and re-run: gci config doctor")
+				fmt.Println("   then update your token source and re-run: gci config doctor")
 				issues++
 			case authProbeForbidden:
 				fmt.Printf("❌ JIRA returned 403 for %s (token from %s)\n", email, tokenSource)

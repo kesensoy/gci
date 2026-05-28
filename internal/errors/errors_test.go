@@ -124,7 +124,7 @@ func TestNewJiraConnectionError(t *testing.T) {
 		{
 			name:           "401 unauthorized",
 			cause:          fmt.Errorf("HTTP 401: Unauthorized"),
-			expectedRemediation: "API token is rejected",
+			expectedRemediation: "rejected your API token",
 		},
 		{
 			name:           "timeout error",
@@ -165,7 +165,7 @@ func TestNewHttpError(t *testing.T) {
 		expectedTitle    string
 		expectedRemediation string
 	}{
-		{401, "❌ Authentication Failed", "API token is rejected"},
+		{401, "❌ Authentication Failed", "rejected your API token"},
 		{403, "❌ Access Forbidden", "Your account lacks permission"},
 		{404, "❌ Resource Not Found", "The requested JIRA resource was not found"},
 		{500, "❌ Server Error", "JIRA server is experiencing issues"},
