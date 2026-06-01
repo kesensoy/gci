@@ -410,29 +410,102 @@ func loadConfig() (*Config, error) {
 	}, nil
 }
 
-// isJiraTokenValid checks if the given email/token can authenticate to Jira by calling /myself
-func isJiraTokenValid(jiraURL, email, token string) bool {
-	if jiraURL == "" || email == "" || token == "" {
-		return false
+// authProbeStatus is the outcome of a /myself authentication probe.
+type authProbeStatus int
+
+const (
+	authProbeOK authProbeStatus = iota
+	authProbeNoToken
+	authProbeNoEmail
+	authProbeUnauthorized // 401 — token rejected (often expired)
+	authProbeForbidden    // 403 — token authenticated but lacks permission
+	authProbeNetworkError
+	authProbeUnexpectedStatus
+)
+
+// authProbeResult carries the outcome plus details for a useful diagnostic.
+type authProbeResult struct {
+	Status     authProbeStatus
+	StatusCode int    // HTTP status when reached the server, else 0
+	Email      string // resolved email actually used
+	Detail     string // free-form context (network error, response snippet, etc.)
+}
+
+// probeJiraAuth issues GET /rest/api/3/myself with HTTP Basic auth (with at
+// most one retry on transient network errors). It returns a structured result
+// rather than an error so callers can render distinct remediation guidance
+// per failure mode.
+func probeJiraAuth(jiraURL, email, token string) authProbeResult {
+	if token == "" {
+		return authProbeResult{Status: authProbeNoToken}
 	}
-	
+	if email == "" {
+		return authProbeResult{Status: authProbeNoEmail}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	
-	client := httputil.NewRetryableClient(5*time.Second, 1) // Quick validation, minimal retries
+
+	client := httputil.NewRetryableClient(5*time.Second, 1)
 	req, err := http.NewRequest("GET", fmt.Sprintf("%s/rest/api/3/myself", jiraURL), nil)
 	if err != nil {
-		return false
+		return authProbeResult{Status: authProbeNetworkError, Email: email, Detail: err.Error()}
 	}
 	req.SetBasicAuth(email, token)
 	req.Header.Set("Accept", "application/json")
-	
+
 	resp, err := client.DoWithRetry(ctx, req)
 	if err != nil {
-		return false
+		return authProbeResult{Status: authProbeNetworkError, Email: email, Detail: err.Error()}
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	// Drain the body so the transport can return the connection to the pool;
+	// idiomatic even though this short-lived diagnostic client does not reuse it.
+	io.Copy(io.Discard, resp.Body)
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return authProbeResult{Status: authProbeOK, StatusCode: resp.StatusCode, Email: email}
+	case http.StatusUnauthorized:
+		return authProbeResult{Status: authProbeUnauthorized, StatusCode: resp.StatusCode, Email: email}
+	case http.StatusForbidden:
+		return authProbeResult{Status: authProbeForbidden, StatusCode: resp.StatusCode, Email: email}
+	default:
+		return authProbeResult{Status: authProbeUnexpectedStatus, StatusCode: resp.StatusCode, Email: email}
+	}
+}
+
+// resolveJiraCreds returns the email and API token gci would use at runtime,
+// applying the same precedence as loadConfig (env > 1Password) without its
+// os.Exit guard. tokenSource describes where the token came from for logging.
+func resolveJiraCreds(userConfig usercfg.Config) (email, token, tokenSource string) {
+	if out, err := exec.Command("git", "config", "user.email").Output(); err == nil {
+		email = strings.TrimSpace(string(out))
+		for oldDomain, newDomain := range userConfig.EmailDomainMap {
+			email = strings.Replace(email, oldDomain, newDomain, 1)
+		}
+	}
+
+	if envToken := os.Getenv("JIRA_API_TOKEN"); envToken != "" {
+		return email, envToken, "JIRA_API_TOKEN env var"
+	}
+	if userConfig.OPJiraTokenPath != "" {
+		out, err := exec.Command("op", "read", userConfig.OPJiraTokenPath).Output()
+		if err == nil {
+			return email, strings.TrimSpace(string(out)), "1Password (" + userConfig.OPJiraTokenPath + ")"
+		}
+		return email, "", "1Password (" + userConfig.OPJiraTokenPath + ") — op read failed: " + err.Error()
+	}
+	return email, "", "no token source configured"
+}
+
+// isJiraTokenValid checks if the given email/token can authenticate to Jira by calling /myself.
+// It delegates to probeJiraAuth so the actual HTTP probe logic lives in one place.
+func isJiraTokenValid(jiraURL, email, token string) bool {
+	if jiraURL == "" {
+		return false
+	}
+	return probeJiraAuth(jiraURL, email, token).Status == authProbeOK
 }
 
 // fetchJiraEmail calls /rest/api/3/myself and returns the account's email address.
@@ -1967,6 +2040,7 @@ func runConfigDoctor(cmd *cobra.Command, args []string) {
 	}
 
 	// Check JIRA URL
+	jiraURLValid := false
 	if config.JiraURL == "" {
 		fmt.Println("⚠️  JIRA URL not configured")
 		fmt.Println("   Run: gci setup")
@@ -1977,6 +2051,53 @@ func runConfigDoctor(cmd *cobra.Command, args []string) {
 		issues++
 	} else {
 		fmt.Printf("✅ JIRA URL configured: %s\n", config.JiraURL)
+		jiraURLValid = true
+	}
+
+	// Live authentication probe — the previous doctor never actually verified
+	// credentials, so an expired/revoked token produced "all healthy" reports
+	// while every API call returned 401.
+	if jiraURLValid {
+		email, token, tokenSource := resolveJiraCreds(config)
+		switch {
+		case token == "":
+			fmt.Printf("⚠️  Could not resolve a JIRA API token (%s)\n", tokenSource)
+			fmt.Println("   Set JIRA_API_TOKEN or configure op_jira_token_path; then run: gci setup")
+			issues++
+		case email == "":
+			fmt.Println("⚠️  Could not resolve an email for JIRA auth")
+			fmt.Println("   Set git config user.email and re-run: gci config doctor")
+			issues++
+		default:
+			result := probeJiraAuth(config.JiraURL, email, token)
+			switch result.Status {
+			case authProbeOK:
+				fmt.Printf("✅ JIRA authentication OK (%s, token from %s)\n", email, tokenSource)
+			case authProbeUnauthorized:
+				fmt.Printf("❌ JIRA returned 401 for %s (token from %s)\n", email, tokenSource)
+				fmt.Println("   Atlassian rejected the token. Common cause: expiry — Atlassian assigns")
+				fmt.Println("   expiry dates to API tokens automatically.")
+				fmt.Println("   Create a new classic (unscoped) token at:")
+				fmt.Println("     https://id.atlassian.com/manage-profile/security/api-tokens")
+				fmt.Println("   then update your token source and re-run: gci config doctor")
+				issues++
+			case authProbeForbidden:
+				fmt.Printf("❌ JIRA returned 403 for %s (token from %s)\n", email, tokenSource)
+				fmt.Println("   The token authenticated but lacks permission for /myself.")
+				fmt.Println("   If you used a scoped token, gci needs a classic (unscoped) one.")
+				issues++
+			case authProbeNetworkError:
+				fmt.Printf("⚠️  Could not reach %s: %s\n", config.JiraURL, result.Detail)
+				fmt.Println("   Check your network and the configured jira_url.")
+				issues++
+			case authProbeUnexpectedStatus:
+				fmt.Printf("⚠️  JIRA returned HTTP %d (unexpected)\n", result.StatusCode)
+				issues++
+			default:
+				fmt.Printf("⚠️  Unexpected auth probe status: %d (HTTP %d)\n", result.Status, result.StatusCode)
+				issues++
+			}
+		}
 	}
 
 	fmt.Println()
