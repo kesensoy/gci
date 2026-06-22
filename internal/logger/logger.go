@@ -86,11 +86,11 @@ func getDebugLogFile() *os.File {
 	}
 	
 	logPath := filepath.Join(home, ".config", "gci_debug.log")
-	if err := os.MkdirAll(filepath.Dir(logPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logPath), 0700); err != nil {
 		return nil
 	}
-	
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return nil
 	}

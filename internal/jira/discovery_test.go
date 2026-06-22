@@ -1,6 +1,8 @@
 package jira
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,7 +105,7 @@ func TestGetCacheFilePath(t *testing.T) {
 		t.Skip("No home directory available")
 	}
 	
-	if len(path) < 21 || path[len(path)-21:] != "gci_boards_cache.json" {
-		t.Errorf("Cache file path should end with gci_boards_cache.json, got %s", path)
+	if !strings.HasSuffix(path, filepath.Join("gci", "boards_cache.json")) {
+		t.Errorf("Cache file path should end with gci/boards_cache.json, got %s", path)
 	}
 }
